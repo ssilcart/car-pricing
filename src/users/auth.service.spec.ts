@@ -1,5 +1,6 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { sign } from 'crypto';
 import { AuthService } from './auth.service';
 import { User } from './user.entity';
 import { UsersService } from './users.service';
@@ -9,14 +10,23 @@ describe('AuthService', () => {
   let fakeUsersService: Partial<UsersService>;
 
   beforeEach(async () => {
+    const users: User[] = [];
     fakeUsersService = {
-      find: () => Promise.resolve([]),
-      create: (email: string, password: string) =>
-        Promise.resolve({
-          id: 1,
+      find: (email: string) => {
+        const filteredUsers = users.filter((user) => user.email === email);
+
+        return Promise.resolve(filteredUsers);
+      },
+      create: (email: string, password: string) => {
+        const user = {
+          id: users.length,
           email,
           password,
-        } as User),
+        } as User;
+        users.push(user);
+
+        return Promise.resolve(user);
+      },
     };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -53,7 +63,7 @@ describe('AuthService', () => {
         email: 'foo@bar.com',
         password: 'abc123',
       };
-      fakeUsersService.find = () => Promise.resolve([signUpUser as User]);
+      await service.signup(signUpUser.email, signUpUser.password);
       await expect(
         service.signup(signUpUser.email, signUpUser.password),
       ).rejects.toThrow(BadRequestException);
@@ -61,14 +71,36 @@ describe('AuthService', () => {
   });
 
   describe('signin', () => {
+    it('should fail if invalid password is provided', async () => {
+      const signUpUser = {
+        email: 'foo@bar.com',
+        password: 'abc.123',
+      };
+      const randomPassword = 'Abc.1234';
+      await service.signup(signUpUser.email, signUpUser.password);
+      await expect(
+        service.signin(signUpUser.email, randomPassword),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
     it('should fail if not registered Email', async () => {
       const signUpUser = {
         email: 'foo@bar.com',
-        password: 'abc123',
+        password: 'abc.123',
       };
       await expect(
         service.signin(signUpUser.email, signUpUser.password),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should return user if email and password are correct', async () => {
+      const signUpUser = {
+        email: 'foo@bar.com',
+        password: 'abc.123',
+      };
+      await service.signup(signUpUser.email, signUpUser.password);
+      const user = service.signin(signUpUser.email, signUpUser.password);
+      await expect(user).toBeDefined();
     });
   });
 });
